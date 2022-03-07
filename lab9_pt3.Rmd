@@ -1,0 +1,193 @@
+---
+title: 'ESM 244 Lab Week 9: The Hobbit Text Analysis'
+author: "Kiera Matiska"
+date: "3/7/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# attach packages
+library(tidyverse)
+library(tidytext)
+library(textdata)
+library(pdftools)
+library(ggwordcloud)
+```
+
+## Get The Hobbit
+
+```{r, cache = TRUE}
+hobbit_text <- pdf_text(here::here("data", "the-hobbit.pdf"))
+```
+
+- Just want to read in a singe page?
+
+```{r}
+hobbit_p34 <- hobbit_text[34]
+```
+
+Let's first get it into a data frame. Then we'll do some wrangling with the tidyverse, break it up by chapter, and do some analyses.
+
+```{r}
+hobbit_lines <- data.frame(hobbit_text) %>% 
+  mutate(page = 1:n()) %>% 
+  mutate(text_full = str_split(hobbit_text, pattern = "\\n")) %>% 
+  unnest(text_full) %>% 
+  mutate(text_full = str_trim(text_full))
+```
+
+## Do some tidying
+
+```{r}
+hobbit_chapts <- hobbit_lines %>% 
+  slice(-(1:137)) %>% 
+          mutate(chapter = ifelse(str_detect(text_full, "Chapter"), text_full, NA)) %>% 
+          fill(chapter, .direction = "down") %>% 
+          separate(col = chapter, into = c("ch", "no"), sep = " ") %>% 
+          mutate(chapter = as.numeric(as.roman(no)))
+```
+
+## Get some word counts by Chapter!
+
+```{r}
+hobbit_words <- hobbit_chapts %>% 
+  unnest_tokens(word, text_full) %>% 
+  select(-hobbit_text)
+```
+
+```{r}
+hobbit_wordcount <- hobbit_words %>% 
+  count(chapter, word)
+```
+
+## Remove stop words
+
+```{r}
+head(stop_words)
+
+hobbit_words_clean <- hobbit_words %>% 
+  anti_join(stop_words, by = "word")
+```
+
+```{r}
+nonstop_counts <- hobbit_words_clean %>% 
+  count(chapter, word)
+```
+
+## Find the top 5 words from each chapter
+
+```{r}
+top_5_words <- nonstop_counts %>% 
+  group_by(chapter) %>% 
+  arrange(-n) %>% 
+  slice(1:5) %>% 
+  ungroup()
+
+# Make some graphs:
+ggplot(data = top_5_words,
+       aes(x = n, y = word)) +
+  geom_col(fill = "blue") +
+           facet_wrap(~chapter, scales = "free")
+```
+
+## Let's make a word cloud for Chapter 1
+
+```{r}
+ch1_top100 <- nonstop_counts %>% 
+  filter(chapter == 1) %>% 
+  arrange(-n) %>% 
+  slice(1:100)
+```
+
+```{r}
+ch1_cloud <- ggplot(data = ch1_top100,
+                    aes(label = word)) +
+  geom_text_wordcloud(aes(color = n, size = n),
+                      shape = "diamond") +
+  scale_size_area(max_size = 6) +
+  scale_color_gradientn(colors = c("darkgreen", "blue", "purple")) +
+  theme_minimal()
+
+ch1_cloud
+```
+
+## How do sentiments change over the course of the book?
+
+```{r}
+get_sentiments(lexicon = "afinn")
+
+# Let's look at the pretty positive words:
+afinn_pos <- get_sentiments("afinn") %>% 
+  filter(value %in% c(3,4,5))
+
+# Check them out:
+afinn_pos
+
+# Let's look at the pretty negative words:
+afinn_neg <- get_sentiments("afinn") %>% 
+  filter(value %in% c(-5,-4,-3))
+
+#Check them out:
+afinn_neg
+```
+
+```{r}
+get_sentiments(lexicon = "bing")
+```
+
+```{r}
+get_sentiments(lexicon = "nrc")
+```
+
+## Sentiment Analysis with afinn:
+
+```{r}
+hobbit_afinn <- hobbit_words_clean %>% 
+  inner_join(get_sentiments("afinn"), by = "word")
+```
+
+```{r}
+afinn_counts <- hobbit_afinn %>% 
+  count(chapter, value)
+
+# Plot them:
+ggplot(data = afinn_counts,
+       aes(x = value, y = n)) +
+  geom_col() +
+  facet_wrap(~chapter)
+
+# Find the mean afinn score by chapter:
+afinn_means <- hobbit_afinn %>% 
+  group_by(chapter) %>% 
+  summarize(mean_afinn = mean(value))
+
+ggplot(data = afinn_means,
+       aes(x = fct_rev(factor(chapter)),
+           y = mean_afinn)) +
+  # y = fct_rev(as.factor(chapter)))) +
+  geom_col() +
+  coord_flip()
+```
+
+## Now with NRC lexicon
+
+```{r}
+hobbit_nrc <- hobbit_words_clean %>% 
+  inner_join(get_sentiments("nrc"))
+```
+
+```{r}
+hobbit_nrc_counts <- hobbit_nrc %>% 
+  count(chapter, sentiment)
+
+ggplot(data = hobbit_nrc_counts,
+       aes(x = sentiment, y = n)) +
+  geom_col() +
+  facet_wrap(~chapter) +
+  coord_flip()
+```
+
+
+
